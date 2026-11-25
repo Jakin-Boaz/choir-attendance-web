@@ -106,6 +106,8 @@ a.open{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(
 .danger{border:2px solid var(--red);border-radius:14px;padding:12px;display:grid;gap:8px}.danger p{color:var(--ink)}
 .mutedlink{color:var(--mute)}
 .newpw{font:900 28px 'Nunito',monospace;color:var(--ink)!important;letter-spacing:1px;background:var(--soft);border-radius:12px;padding:12px;word-break:break-all}
+.myrate{margin-top:14px}.mrhead{display:flex;align-items:baseline;justify-content:space-between;gap:10px}.mrhead h2{margin:0}.mrhead b{font:900 clamp(30px,9vw,40px)/1 'Nunito',sans-serif}
+.myrate .track{height:18px;margin:12px 0 10px}.myrate .hint{margin:0}.myrate .hint b{color:var(--ink)}
 .shot{width:100%;border-radius:12px;border:2px solid var(--line)}
 .daylist li{grid-template-columns:78px 12px minmax(0,1fr) auto}
 .daylist .tm{font-weight:800;color:var(--b);white-space:nowrap;font-size:14px}
@@ -155,7 +157,7 @@ a.open{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(
 <main id="view"></main>
 </div>
 <nav class="tabbar" aria-label="메뉴">
-<button data-tab="home" aria-label="출석"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="currentColor"/></svg><span>출석</span></button>
+<button data-tab="home" aria-label="홈"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="currentColor"/></svg><span>홈</span></button>
 <button data-tab="notice" aria-label="공지"><svg viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h3l7 4V5L7 9H4a1 1 0 0 0-1 1z" fill="currentColor"/><path d="M17.5 8.5a5 5 0 0 1 0 7M20 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>공지</span></button>
 <button data-tab="songs" aria-label="찬양곡"><svg viewBox="0 0 24 24"><path d="M9 17V5l11-2v12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"/><circle cx="6.5" cy="17.5" r="3.2" fill="currentColor"/><circle cx="17.5" cy="15" r="3.2" fill="currentColor"/></svg><span>찬양곡</span></button>
 <button data-tab="stats" aria-label="통계"><svg viewBox="0 0 24 24"><rect x="3" y="12" width="5" height="9" rx="1.5" fill="currentColor"/><rect x="9.5" y="4" width="5" height="17" rx="1.5" fill="currentColor"/><rect x="16" y="8" width="5" height="13" rx="1.5" fill="currentColor"/></svg><span>통계</span></button>
@@ -304,6 +306,16 @@ async function adminCall(body){
 }
 const FN_MSG={owner:'대표 관리자 계정은 삭제할 수 없어요.',forbidden:'권한이 없어요. 관리자에게 문의해 주세요.',weak_password:'비밀번호는 6자 이상이어야 해요.',not_account:'앱에 가입한 대원만 비밀번호를 바꿀 수 있어요.',unauthorized:'다시 로그인해 주세요.'};
 async function fnSafe(fn,fail){try{await fn()}catch(e){toast(FN_MSG[e&&e.fn]||(/fetch|network/i.test(String(e&&e.message))?'인터넷 연결을 확인해 주세요.':fail))}render(true);load()}
+// 로그인한 대원 본인의 출석률 (각자 들어온 날 이후 모임 기준)
+function myRate(){
+ const mine=datesOf(me),s=stats(me),mon=today().slice(0,7);
+ let join=(myProfile()||{}).joined||'9999';for(const d in mine)if(d<join)join=d;
+ const G=gath().map(g=>g.d).filter(d=>d>=join),GM=G.filter(d=>d.startsWith(mon)),am=GM.filter(d=>mine[d]).length,att=G.filter(d=>mine[d]).length;
+ const col=s.rate>=80?'var(--g)':s.rate>=50?'var(--gold)':'var(--red)';
+ return `<section class="card myrate"><div class="mrhead"><h2>내 출석률</h2><b style="color:${col}">${G.length?s.rate+'%':'–'}</b></div>
+ <div class="track"><i style="width:${s.rate}%;background:${col}"></i></div>
+ <p class="hint">${G.length?`모임 ${G.length}번 중 <b>${att}번</b> 출석${GM.length?` · 이번 달 ${GM.length}번 중 <b>${am}번</b>`:''}`:'아직 모임 기록이 없어요.'}</p></section>`;
+}
 function home(){
  const p=myProfile(),s=stats(me),t=today(),mine=datesOf(me),done=!!mine[t],mt=metaOf(me,t);
  const msg=!p?'반가워요! 먼저 이름과 파트를 알려 주세요.':done?`오늘도 함께해서 기뻐요, ${esc(p.name)}님!`:s.cur>0?`${s.cur}회 연속 출석 중이에요. 오늘도 함께해요!`:'오늘도 함께 찬양해요!';
@@ -314,6 +326,7 @@ function home(){
  const nl=Object.values(st.notices).sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||String(b.at).localeCompare(String(a.at)))[0];
  return `<div class="hero">${MASCOT(done?'bob':'')}<p class="bubble">${msg}</p></div>
  ${act}
+ ${p?myRate():''}
  ${isAdmin()?approvalPanel()+checkPanel():''}
  ${nl?`<h2 class="sec">공지</h2><article class="card notice ${nl.pinned?'pin':''}">${nl.pinned?'<span class="tag">고정</span>':''}<h3>${esc(nl.title)}</h3><button class="link" data-act="go" data-v="notice">공지 모두 보기</button></article>`:''}`;
 }

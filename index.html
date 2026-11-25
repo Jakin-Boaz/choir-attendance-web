@@ -100,6 +100,12 @@ a.open{display:inline-flex;align-items:center;gap:6px;min-height:44px;color:var(
 .rform{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}.rform input{flex:1 1 180px}.rform .btn{width:auto;min-height:48px;padding:8px 16px;font-size:16px}
 .meta .acts{display:flex;align-items:center;gap:2px}
 .sharetext{text-align:left;font-size:15px;line-height:1.5}
+.pendbox{border-color:var(--gold);background:var(--soft)}
+.btn.mini{width:auto;min-height:40px;padding:6px 14px;font-size:15px;margin-left:auto}
+.btn.red{background:var(--red);box-shadow:0 4px 0 #d33131}
+.danger{border:2px solid var(--red);border-radius:14px;padding:12px;display:grid;gap:8px}.danger p{color:var(--ink)}
+.mutedlink{color:var(--mute)}
+.newpw{font:900 28px 'Nunito',monospace;color:var(--ink)!important;letter-spacing:1px;background:var(--soft);border-radius:12px;padding:12px;word-break:break-all}
 .shot{width:100%;border-radius:12px;border:2px solid var(--line)}
 .daylist li{grid-template-columns:78px 12px minmax(0,1fr) auto}
 .daylist .tm{font-weight:800;color:var(--b);white-space:nowrap;font-size:14px}
@@ -187,14 +193,15 @@ const configured=/^https:\/\//.test(SB_URL)&&SB_KEY.length>20;
 const sb=configured?createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}}):null;
 
 let me=null,email='',authed=false,authKnown=false,loaded=false,setupDone=false,busy=false,cfgChecked=false,gen=0,chan=null,tmr=null;
-const blank=()=>({members:{},checkins:{},notices:{},week:null,cfg:{},meta:{},abs:{}});
+const blank=()=>({members:{},pending:{},checkins:{},notices:{},week:null,cfg:{},meta:{},abs:{}});
 let st=blank();
 let tab=location.hash.slice(1);if(!VIEWS.includes(tab))tab='home';
-const ui={type:TYPES[0],aDate:today(),aType:TYPES[0],editSongs:null,confirm:null,notice:false,slow:false,synced:false,authMode:'login',listDate:'',reasonEdit:null,sharing:false};
+const ui={type:TYPES[0],aDate:today(),aType:TYPES[0],editSongs:null,confirm:null,notice:false,slow:false,synced:false,authMode:'login',listDate:'',pw:null,delAsk:false,reasonEdit:null,sharing:false};
 
 const owner=()=>!!me&&st.cfg.owner===me;
 const isAdmin=()=>owner()||(st.cfg.managers||[]).includes(me);
-const myProfile=()=>st.members[me];
+const myProfile=()=>st.members[me]||st.pending[me];
+const isPending=()=>!!st.pending[me]&&!isAdmin();
 const datesOf=id=>(st.checkins[id]||{}).dates||{};
 function gath(){const m={};for(const c of Object.values(st.checkins))for(const [d,t] of Object.entries(c.dates||{}))if(!m[d])m[d]=t;return Object.keys(m).sort().map(d=>({d,t:m[d]}))}
 function stats(id){
@@ -223,12 +230,12 @@ async function load(){
    const [mem,att,nots,wk,cf,ab]=await Promise.all([all('members',['id']),all('attendance',['member_id','day']),all('notices',['created_at']),
     sb.from('week_songs').select('*').eq('id',1).maybeSingle().then(chk),sb.from('app_config').select('*').eq('id',1).maybeSingle().then(chk),all('absences',['member_id','day'])]);
    if(g!==gen)return;
-   const members={},checkins={},notices={},meta={},abs={};
+   const members={},pending={},checkins={},notices={},meta={},abs={};
    ab.forEach(a=>{abs[a.member_id+'|'+a.day]=a.reason});
-   mem.forEach(m=>{members[m.id]={name:m.name,part:m.part,joined:m.joined,manual:m.manual}});
+   mem.forEach(m=>{const o={name:m.name,part:m.part,joined:m.joined,manual:m.manual,approved:m.approved!==false};(o.approved?members:pending)[m.id]=o});
    att.forEach(a=>{(checkins[a.member_id]||(checkins[a.member_id]={dates:{}})).dates[a.day]=a.kind;meta[a.member_id+'|'+a.day]={at:a.created_at,by:a.marked_by}});
    nots.forEach(n=>{notices[n.id]={title:n.title,body:n.body,pinned:n.pinned,at:n.created_at}});
-   st={members,checkins,notices,week:wk.data?{label:wk.data.label,items:wk.data.items||[]}:null,cfg:cf.data?{owner:cf.data.owner,managers:cf.data.managers||[]}:{},meta,abs};
+   st={members,pending,checkins,notices,week:wk.data?{label:wk.data.label,items:wk.data.items||[]}:null,cfg:cf.data?{owner:cf.data.owner,managers:cf.data.managers||[]}:{},meta,abs};
    loaded=true;ui.synced=true;ui.slow=false;
    if(!cf.data&&!cfgChecked){cfgChecked=true;const r=await sb.from('app_config').insert({id:1,owner:me,managers:[]});
     if(!r.error&&g===gen){st.cfg={owner:me,managers:[]};toast('첫 가입자라서 대표 관리자가 되었어요.')}}
@@ -261,6 +268,7 @@ function render(force){
  if(!authed){$('#top').innerHTML='';if(force||!formBusy())$('#view').innerHTML=authV();return}
  if(!loaded){$('#view').innerHTML=`<div class="loading">${MASCOT('bob')}<p>${ui.slow?'아직 불러오지 못했어요. 인터넷 연결을 확인해 주세요.':'불러오는 중…'}</p></div>`;return}
  top();
+ if(isPending()){nav.hidden=true;$('#view').innerHTML=pendingV();return}
  if(force||!formBusy())$('#view').innerHTML=({home,notice,songs,stats:statsV})[tab]();
  if(me&&ui.synced&&!myProfile()&&!setupDone){setupDone=true;openSetup()}
 }
@@ -278,6 +286,24 @@ function authV(){
  <p class="center">${m==='login'?`<button class="link" data-act="amode" data-v="signup">처음이에요 · 가입하기</button><br><button class="link" data-act="amode" data-v="reset">비밀번호를 잊었어요</button>`:`<button class="link" data-act="amode" data-v="login">로그인으로 돌아가기</button>`}</p>`;
 }
 const AUTH_MSG={invalid_credentials:'이메일이나 비밀번호가 맞지 않아요.',email_not_confirmed:'이메일 확인이 아직 안 됐어요. 총무님께 문의해 주세요.',user_already_exists:'이미 가입된 이메일이에요. 로그인해 주세요.',email_exists:'이미 가입된 이메일이에요. 로그인해 주세요.',weak_password:'비밀번호는 6자 이상이어야 해요.',email_address_invalid:'이메일 주소를 확인해 주세요.',validation_failed:'이메일과 비밀번호를 확인해 주세요.',over_request_rate_limit:'시도가 너무 많아요. 잠시 후 다시 해 주세요.',over_email_send_rate_limit:'시도가 너무 많아요. 잠시 후 다시 해 주세요.',signup_disabled:'지금은 가입을 받지 않아요.'};
+function pendingV(){
+ const p=myProfile()||{};
+ return `<div class="hero" style="margin-top:20px">${MASCOT('bob')}<p class="bubble">가입 신청을 보냈어요${p.name?', '+esc(p.name)+'님':''}! 총무님이 승인하면 바로 쓸 수 있어요.</p></div>
+ <div class="wait">승인을 기다리는 중이에요. 승인되면 이 화면이 저절로 바뀌어요.</div>
+ <p class="center"><button class="link" data-act="setup">내 정보 · 로그아웃</button></p>`;
+}
+function approvalPanel(){
+ const ids=Object.keys(st.pending);if(!ids.length)return '';
+ return `<section class="card admin pendbox"><h2>가입 승인 대기 <small class="cnt">${ids.length}명</small></h2><p class="hint">찬양대원이 맞는지 확인하고 승인해 주세요. 승인 전에는 아무 내용도 볼 수 없어요.</p><ul class="mlist">${ids.map(id=>{const m=st.pending[id],pc=PARTS[m.part]||['','#afafaf'];
+  return `<li><span class="pdot" style="background:${pc[1]}"></span><span class="nm">${esc(m.name)}</span><small>${pc[0]}</small><button class="btn mini" data-act="approve" data-id="${esc(id)}">승인</button>${ui.confirm==='reject/'+id?`<button class="link red" data-act="reject" data-id="${esc(id)}">정말 거절할까요?</button>`:`<button class="link" data-act="ask" data-p="reject/${esc(id)}">거절</button>`}</li>`}).join('')}</ul></section>`;
+}
+async function adminCall(body){
+ const r=await sb.functions.invoke('admin-tools',{body});
+ if(r.error){let code='';try{code=(await r.error.context.json()).error}catch(_){}const e=new Error(code||r.error.message);e.fn=code;throw e}
+ return r.data;
+}
+const FN_MSG={owner:'대표 관리자 계정은 삭제할 수 없어요.',forbidden:'권한이 없어요. 관리자에게 문의해 주세요.',weak_password:'비밀번호는 6자 이상이어야 해요.',not_account:'앱에 가입한 대원만 비밀번호를 바꿀 수 있어요.',unauthorized:'다시 로그인해 주세요.'};
+async function fnSafe(fn,fail){try{await fn()}catch(e){toast(FN_MSG[e&&e.fn]||(/fetch|network/i.test(String(e&&e.message))?'인터넷 연결을 확인해 주세요.':fail))}render(true);load()}
 function home(){
  const p=myProfile(),s=stats(me),t=today(),mine=datesOf(me),done=!!mine[t],mt=metaOf(me,t);
  const msg=!p?'반가워요! 먼저 이름과 파트를 알려 주세요.':done?`오늘도 함께해서 기뻐요, ${esc(p.name)}님!`:s.cur>0?`${s.cur}회 연속 출석 중이에요. 오늘도 함께해요!`:'오늘도 함께 찬양해요!';
@@ -288,7 +314,7 @@ function home(){
  const nl=Object.values(st.notices).sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||String(b.at).localeCompare(String(a.at)))[0];
  return `<div class="hero">${MASCOT(done?'bob':'')}<p class="bubble">${msg}</p></div>
  ${act}
- ${isAdmin()?checkPanel():''}
+ ${isAdmin()?approvalPanel()+checkPanel():''}
  ${nl?`<h2 class="sec">공지</h2><article class="card notice ${nl.pinned?'pin':''}">${nl.pinned?'<span class="tag">고정</span>':''}<h3>${esc(nl.title)}</h3><button class="link" data-act="go" data-v="notice">공지 모두 보기</button></article>`:''}`;
 }
 function checkPanel(){
@@ -342,12 +368,13 @@ function adminV(rows){
  const role=x=>x.id===st.cfg.owner?'<small>대표 관리자</small>':mg.includes(x.id)?'<small>관리자</small>':x.m.manual?'<small>직접 추가</small>':'';
  return `<h2 class="sec">관리자 메뉴</h2>
  <section class="card admin"><h2>대원 추가</h2><p class="hint">앱을 설치하지 않는 대원도 여기서 추가하면 출석 체크 명단에 들어가요.</p><form id="mf" class="form"><input name="n" placeholder="이름" required maxlength="20" aria-label="이름"><div class="parts">${Object.entries(PARTS).map(([k,[n,c]])=>`<label class="pr"><input type="radio" name="p" value="${k}" required><span style="--c:${c}">${n}</span></label>`).join('')}</div><button class="btn">추가하기</button></form></section>
- <section class="card admin"><h2>대원 목록</h2><ul class="mlist">${rows.map(x=>`<li><span class="pdot" style="background:${(PARTS[x.m.part]||[0,'#afafaf'])[1]}"></span><span class="nm">${esc(x.m.name)}</span>${role(x)}${owner()&&!x.m.manual&&x.id!==me?`<button class="link" data-act="mgr" data-id="${esc(x.id)}">${mg.includes(x.id)?'관리자 해제':'관리자로 지정'}</button>`:''}${x.id!==me&&x.id!==st.cfg.owner?delBtn('members/'+x.id):''}</li>`).join('')||'<li class="hint">아직 없어요.</li>'}</ul></section>`;
+ <section class="card admin"><h2>대원 목록</h2><ul class="mlist">${rows.map(x=>`<li><span class="pdot" style="background:${(PARTS[x.m.part]||[0,'#afafaf'])[1]}"></span><span class="nm">${esc(x.m.name)}</span>${role(x)}${owner()&&!x.m.manual&&x.id!==me?`<button class="link" data-act="mgr" data-id="${esc(x.id)}">${mg.includes(x.id)?'관리자 해제':'관리자로 지정'}</button>`:''}${!x.m.manual&&x.id!==me?`<button class="link" data-act="pw" data-id="${esc(x.id)}">비밀번호 초기화</button>`:''}${x.id!==me&&x.id!==st.cfg.owner?delBtn('members/'+x.id):''}${ui.pw===x.id?`<form id="pwf" data-id="${esc(x.id)}" class="rform"><input name="np" type="text" minlength="6" maxlength="72" required autocomplete="off" placeholder="새 비밀번호 (6자 이상)" aria-label="${esc(x.m.name)} 새 비밀번호"><button class="btn">바꾸기</button><button type="button" class="link" data-act="pwcancel">취소</button></form>`:''}</li>`).join('')||'<li class="hint">아직 없어요.</li>'}</ul><p class="hint" style="margin-top:10px">앱에 가입한 대원을 삭제하면 계정과 출석 기록이 함께 지워져요.</p></section>
+ <section class="card admin"><h2>기록 백업</h2><p class="hint">전체 출석 기록을 엑셀에서 열 수 있는 파일(CSV)로 내려받아요. 한 달에 한 번쯤 보관해 두면 안전해요.</p><button class="btn ghost" data-act="csv">출석 기록 내려받기</button></section>`;
 }
 
 function openSetup(){
  if(!me)return;const p=myProfile()||{};
- $('#modal').innerHTML=`<form class="sheet" id="pf">${MASCOT()}<h2>${p.name?'내 정보 수정':'반가워요!'}</h2><p>찬양대에서 쓸 이름과 파트를 알려 주세요.</p><input name="n" value="${esc(p.name||'')}" placeholder="이름 (예: 김은혜)" required maxlength="20" aria-label="이름"><div class="parts">${Object.entries(PARTS).map(([k,[n,c]])=>`<label class="pr"><input type="radio" name="p" value="${k}" ${p.part===k?'checked':''} required><span style="--c:${c}">${n}</span></label>`).join('')}</div><button class="btn">확인</button>${p.name?'<button type="button" class="link" data-act="close">닫기</button>':''}<p class="hint">${esc(email)}로 로그인 중 · <button type="button" class="link" data-act="logout">로그아웃</button></p></form>`;
+ $('#modal').innerHTML=`<form class="sheet" id="pf">${MASCOT()}<h2>${p.name?'내 정보 수정':'반가워요!'}</h2><p>찬양대에서 쓸 이름과 파트를 알려 주세요.</p><input name="n" value="${esc(p.name||'')}" placeholder="이름 (예: 김은혜)" required maxlength="20" aria-label="이름"><div class="parts">${Object.entries(PARTS).map(([k,[n,c]])=>`<label class="pr"><input type="radio" name="p" value="${k}" ${p.part===k?'checked':''} required><span style="--c:${c}">${n}</span></label>`).join('')}</div><button class="btn">확인</button>${p.name?'<button type="button" class="link" data-act="close">닫기</button>':''}<p class="hint">${esc(email)}로 로그인 중 · <button type="button" class="link" data-act="logout">로그아웃</button></p>${owner()?'':(ui.delAsk?`<div class="danger"><p>계정을 삭제하면 내 출석 기록도 함께 지워지고 되돌릴 수 없어요.</p><button type="button" class="btn red" data-act="delacct">계정 삭제하기</button><button type="button" class="link" data-act="delno">취소</button></div>`:`<button type="button" class="link mutedlink" data-act="delask">계정 삭제</button>`)}</form>`;
  $('#modal').hidden=false;
 }
 function mark(id){const d=ui.aDate;if(!d)return;const cur={...datesOf(id)},on=!!cur[d],kind=ui.aType;if(on)delete cur[d];else cur[d]=kind;setDates(id,cur,d,on?null:{at:new Date().toISOString(),by:me});
@@ -416,6 +443,18 @@ async function shareText(text,title){
  try{await navigator.clipboard.writeText(text);toast('내용을 복사했어요. 원하는 곳에 붙여 넣으세요.');return}catch(_){}
  $('#modal').innerHTML=`<div class="sheet"><h2>${esc(title)}</h2><p>아래 내용을 길게 눌러 복사하세요.</p><textarea class="sharetext" rows="10" readonly>${esc(text)}</textarea><button class="btn" data-act="close">닫기</button></div>`;$('#modal').hidden=false;
 }
+function exportCsv(){
+ const q=v=>{v=String(v??'');return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v};
+ const rows=[['날짜','모임','이름','파트','출석','체크 시간','미참석 사유']];
+ const ids=Object.keys(st.members).sort((a,b)=>String(st.members[a].name).localeCompare(String(st.members[b].name),'ko'));
+ for(const g of gath()){for(const id of ids){const m=st.members[id],k=datesOf(id)[g.d];if(!k&&(m.joined||'')>g.d)continue;const mt=k&&metaOf(id,g.d);
+  rows.push([g.d,k||g.t,m.name,(PARTS[m.part]||[''])[0],k?'출석':'미참석',mt?hm(mt.at):'',k?'':(st.abs[id+'|'+g.d]||'')])}}
+ if(rows.length<2)return toast('아직 출석 기록이 없어요.');
+ const csv='\ufeff'+rows.map(r=>r.map(q).join(',')).join('\r\n'),name='찬양대-출석기록-'+today()+'.csv';
+ if(window.ChoirApp&&window.ChoirApp.shareFile){window.ChoirApp.shareFile(btoa(unescape(encodeURIComponent(csv))),name,'text/csv','출석 기록 저장·보내기');return}
+ try{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);toast('출석 기록 파일을 내려받았어요.')}
+ catch(_){toast('파일을 내려받지 못했어요.')}
+}
 function showImage(url){$('#modal').innerHTML=`<div class="sheet"><h2>출석 현황 이미지</h2><p>이미지를 길게 눌러 저장하거나 공유하세요.</p><img src="${url}" alt="출석 현황" class="shot"><button class="btn" data-act="close">닫기</button></div>`;$('#modal').hidden=false}
 // 휴대폰 뒤로가기: 열린 창(내 정보, 이미지 등)만 닫고 이전 화면으로는 가지 않아요
 window.__onBack=()=>{if(!$('#modal').hidden){closeM();return true}return false};
@@ -424,15 +463,25 @@ document.addEventListener('click',e=>{
  const tb=e.target.closest('.tabbar button');if(tb)return go(tb.dataset.tab);
  const b=e.target.closest('[data-act]');if(!b)return;const a=b.dataset.act;
  if(a==='setup')return openSetup();
- if(a==='close')return closeM();
- if(a==='logout'){closeM();return sb.auth.signOut()}
+ if(a==='close'){ui.delAsk=false;return closeM()}
+ if(a==='logout'){ui.delAsk=false;closeM();return sb.auth.signOut()}
  if(a==='amode'){ui.authMode=b.dataset.v;return render(true)}
  if(a==='go')return go(b.dataset.v);
  if(a==='nnew'){ui.notice=true;return render(true)}
  if(a==='ncancel'){ui.notice=false;return render(true)}
  if(a==='ask'){ui.confirm=b.dataset.p;return render(true)}
  if(a==='del'){const [t,id]=b.dataset.p.split('/');ui.confirm=null;if(!['notices','members'].includes(t))return;
+  if(t==='members'&&st.members[id]&&!st.members[id].manual){const o={...st.members};delete o[id];st={...st,members:o};return fnSafe(()=>adminCall({action:'delete_account',member_id:id}),'삭제하지 못했어요.')}
   const o={...st[t]};delete o[id];st={...st,[t]:o};return safe(async()=>{chk(await sb.from(t).delete().eq('id',id))})}
+ if(a==='approve'){const id=b.dataset.id,m=st.pending[id];if(!m)return;const pend={...st.pending};delete pend[id];st={...st,pending:pend,members:{...st.members,[id]:{...m,approved:true}}};
+  return safe(async()=>{chk(await sb.from('members').update({approved:true}).eq('id',id));toast(m.name+'님을 승인했어요.')})}
+ if(a==='reject'){const id=b.dataset.id;ui.confirm=null;const pend={...st.pending};delete pend[id];st={...st,pending:pend};return fnSafe(()=>adminCall({action:'delete_account',member_id:id}),'거절하지 못했어요.')}
+ if(a==='pw'){ui.pw=b.dataset.id;render(true);const i=$('#pwf input');if(i)i.focus();return}
+ if(a==='pwcancel'){ui.pw=null;return render(true)}
+ if(a==='csv')return exportCsv();
+ if(a==='delask'){ui.delAsk=true;return openSetup()}
+ if(a==='delno'){ui.delAsk=false;return openSetup()}
+ if(a==='delacct'){b.disabled=true;return (async()=>{try{await adminCall({action:'delete_account'});ui.delAsk=false;closeM();await sb.auth.signOut();toast('계정을 삭제했어요.')}catch(e){b.disabled=false;toast(FN_MSG[e&&e.fn]||'삭제하지 못했어요. 잠시 후 다시 시도해 주세요.')}})()}
  if(a==='sedit'){const w=st.week||{};ui.editSongs={label:w.label||'',items:(w.items&&w.items.length?w.items:[{t:'',n:'',l:''}]).map(x=>({t:x.t||'',n:x.n||'',l:x.l||''}))};return render(true)}
  if(a==='sadd'){readSongs();ui.editSongs.items.push({t:'',n:'',l:''});return render(true)}
  if(a==='scancel'){ui.editSongs=null;return render(true)}
@@ -454,8 +503,8 @@ document.addEventListener('submit',async e=>{
   catch(err){toast(AUTH_MSG[err&&err.code]||(/fetch|network/i.test(String(err&&err.message))?'인터넷 연결을 확인해 주세요.':'로그인하지 못했어요. 다시 시도해 주세요.'))}
   btn.disabled=false;return}
  if(f.id==='pf'){const name=String(fd.get('n')||'').trim(),part=fd.get('p');if(!name||!part)return;const p=myProfile()||{},row={name,part,joined:p.joined||today()};
-  closeM();st={...st,members:{...st.members,[me]:{...p,...row}}};
-  return safe(async()=>{chk(await sb.from('members').upsert({id:me,...row}))})}
+  closeM();const into=st.members[me]||isAdmin()?'members':'pending';st={...st,[into]:{...st[into],[me]:{...p,...row,approved:into==='members'}}};
+  return safe(async()=>{chk(await sb.from('members').upsert(isAdmin()&&!st.pending[me]?{id:me,...row,approved:true}:{id:me,...row}))})}
  if(f.id==='nf'){const title=String(fd.get('t')||'').trim();if(!title)return;const body=String(fd.get('b')||'').trim(),pinned=!!fd.get('p');
   ui.notice=false;return safe(async()=>{chk(await sb.from('notices').insert({title,body,pinned}));toast('공지를 올렸어요.')})}
  if(f.id==='sf'){readSongs();const s=ui.editSongs,items=s.items.map(x=>({t:x.t.trim(),n:x.n.trim(),l:x.l.trim()})).filter(x=>x.t),label=s.label.trim();
@@ -463,8 +512,10 @@ document.addEventListener('submit',async e=>{
   return safe(async()=>{chk(await sb.from('week_songs').upsert({id:1,label,items,updated_at:new Date().toISOString()}));toast('찬양곡을 저장했어요.')})}
  if(f.id==='rf'){const id=f.dataset.id,d=ui.listDate,reason=String(fd.get('r')||'').trim().slice(0,100),k=id+'|'+d,abs={...st.abs};if(reason)abs[k]=reason;else delete abs[k];st={...st,abs};ui.reasonEdit=null;
   return safe(async()=>{chk(reason?await sb.from('absences').upsert({member_id:id,day:d,reason,updated_at:new Date().toISOString()}):await sb.from('absences').delete().eq('member_id',id).eq('day',d))})}
+ if(f.id==='pwf'){const id=f.dataset.id,np=String(fd.get('np')||''),m=st.members[id]||{};if(np.length<6)return toast('비밀번호는 6자 이상이어야 해요.');ui.pw=null;
+  return fnSafe(async()=>{await adminCall({action:'reset_password',member_id:id,password:np});$('#modal').innerHTML=`<div class="sheet"><h2>비밀번호를 바꿨어요</h2><p>${esc(m.name||'대원')}님의 새 비밀번호예요. 대원에게 직접 알려 주세요.</p><p class="newpw">${esc(np)}</p><button class="btn" data-act="close">확인</button></div>`;$('#modal').hidden=false},'비밀번호를 바꾸지 못했어요.')}
  if(f.id==='mf'){const name=String(fd.get('n')||'').trim(),part=fd.get('p');if(!name||!part)return;f.reset();
-  return safe(async()=>{chk(await sb.from('members').insert({id:uid('m'),name,part,joined:ui.aDate||today(),manual:true}));toast(name+'님을 추가했어요.')})}
+  return safe(async()=>{chk(await sb.from('members').insert({id:uid('m'),name,part,joined:ui.aDate||today(),manual:true,approved:true}));toast(name+'님을 추가했어요.')})}
 });
 document.addEventListener('change',e=>{
  if(e.target.id==='ad'){ui.aDate=e.target.value;render(true)}
